@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <title>新房装修灵感板 | 每个空间最多20张图片</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #F8F4EE;
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            color: #3E2C23;
+            padding: 1.2rem;
+        }
+        .app-container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #B87C4E, #9B5E2E);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .header p {
+            color: #8B6B4D;
+            margin-top: 0.3rem;
+            font-size: 0.9rem;
+        }
+        .btn-reset {
+            background: #E2D3C4;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 40px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-top: 0.6rem;
+            color: #5A3E28;
+            font-weight: 500;
+            transition: 0.2s;
+        }
+        .btn-reset:hover {
+            background: #CFBCA8;
+        }
+        .rooms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            gap: 1.8rem;
+        }
+        .room-card {
+            background: #FFFFFFF2;
+            backdrop-filter: blur(2px);
+            border-radius: 1.8rem;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.05);
+            overflow: hidden;
+            border: 1px solid #F2E3D4;
+            display: flex;
+            flex-direction: column;
+        }
+        .room-header {
+            background: #FEF3E9;
+            padding: 1rem 1.2rem;
+            border-bottom: 2px solid #F5E2D0;
+        }
+        .room-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #7C5134;
+        }
+        .room-title i {
+            font-size: 1.3rem;
+            color: #C28962;
+        }
+        .global-note-area {
+            padding: 0.9rem 1rem 0.5rem;
+            background: #FEFAF5;
+        }
+        .global-note-area label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #A27248;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .global-note-input {
+            width: 100%;
+            border: 1px solid #EDDCCE;
+            border-radius: 1rem;
+            padding: 0.5rem 0.8rem;
+            font-size: 0.85rem;
+            font-family: inherit;
+            background: white;
+            resize: vertical;
+        }
+        .global-note-input:focus {
+            outline: none;
+            border-color: #C28962;
+            box-shadow: 0 0 0 2px #F0DBCA;
+        }
+        .images-wall {
+            padding: 0.8rem 1rem 1rem;
+            flex: 1;
+        }
+        .images-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .image-item {
+            background: #FFF9F3;
+            border-radius: 1.2rem;
+            overflow: hidden;
+            border: 1px solid #F2E0D0;
+            transition: 0.1s;
+        }
+        .image-preview {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            background: #F0E4D8;
+            display: block;
+        }
+        .image-note {
+            padding: 0.5rem;
+        }
+        .note-input {
+            width: 100%;
+            border: 1px solid #EFDDCD;
+            border-radius: 1rem;
+            padding: 0.4rem 0.6rem;
+            font-size: 0.75rem;
+            font-family: inherit;
+            background: #FFFDF9;
+            resize: vertical;
+        }
+        .note-input:focus {
+            outline: none;
+            border-color: #CB9E77;
+        }
+        .del-img-btn {
+            display: block;
+            background: #F3E3D6;
+            border: none;
+            width: 100%;
+            padding: 0.4rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #B35F2E;
+            cursor: pointer;
+            transition: 0.1s;
+            border-top: 1px solid #F2E0D0;
+        }
+        .del-img-btn:hover {
+            background: #FADEC4;
+        }
+        .add-img-btn {
+            background: #F8EFE6;
+            border: 1px dashed #D6BEAA;
+            border-radius: 2rem;
+            padding: 0.6rem;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            color: #AA7A53;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: 0.15s;
+            margin-top: 0.4rem;
+        }
+        .add-img-btn.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #EADCCF;
+        }
+        .add-img-btn:hover:not(.disabled) {
+            background: #EDDFD1;
+            border-color: #C29A74;
+        }
+        .count-tip {
+            font-size: 0.7rem;
+            color: #B2845C;
+            margin-top: 6px;
+            text-align: right;
+        }
+        .empty-tip {
+            text-align: center;
+            color: #CBB49C;
+            font-size: 0.8rem;
+            padding: 1rem;
+            font-style: italic;
+        }
+        footer {
+            text-align: center;
+            margin-top: 2.5rem;
+            font-size: 0.7rem;
+            color: #B9987A;
+            border-top: 1px solid #EDDECE;
+            padding-top: 1.2rem;
+        }
+        @media (max-width: 780px) {
+            body { padding: 0.9rem; }
+            .rooms-grid { grid-template-columns: 1fr; }
+            .room-title { font-size: 1.2rem; }
+        }
+        button {
+            background: none;
+            border: none;
+        }
+        i {
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <div class="header">
+        <h1><i class="fas fa-home"></i> 我家装修 · 灵感集</h1>
+        <p>为每个空间上传实景图/效果图，添加装修备注（每个空间最多20张图）</p>
+        <button class="btn-reset" id="resetAllData"><i class="fas fa-undo-alt"></i> 重置全部数据</button>
+    </div>
+
+    <div id="roomsContainer" class="rooms-grid"></div>
+    <footer>✨ 所有图片和备注自动保存在浏览器中。每个空间最多可添加20张图片，超出将无法继续添加。</footer>
+</div>
+
+<script>
+    // ---------- 空间列表 ----------
+    const ROOMS = [
+        { id: "entry", name: "玄关", icon: "fa-door-open" },
+        { id: "bath1", name: "卫生间1", icon: "fa-toilet" },
+        { id: "kitchen", name: "厨房", icon: "fa-utensils" },
+        { id: "living", name: "客厅", icon: "fa-couch" },
+        { id: "dining", name: "餐厅", icon: "fa-utensil-spoon" },
+        { id: "balcony", name: "阳台", icon: "fa-sun" },
+        { id: "studyCloset", name: "书房衣帽间", icon: "fa-archive" },
+        { id: "bedroom", name: "卧室", icon: "fa-bed" },
+        { id: "bath2", name: "卫生间2", icon: "fa-shower" }
+    ];
+
+    const MAX_IMAGES_PER_ROOM = 20;  // 每个空间最多20张图片
+
+    // 数据模型
+    let roomsData = {};
+
+    // 加载存储数据
+    function loadData() {
+        const saved = localStorage.getItem("homeRenovationData");
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                for (let room of ROOMS) {
+                    if (!parsed[room.id]) {
+                        parsed[room.id] = { globalNote: "", images: [] };
+                    } else {
+                        if (!parsed[room.id].images) parsed[room.id].images = [];
+                        // 确保每个图片有note字段，并限制不超过最大数量
+                        if (parsed[room.id].images.length > MAX_IMAGES_PER_ROOM) {
+                            parsed[room.id].images = parsed[room.id].images.slice(0, MAX_IMAGES_PER_ROOM);
+                        }
+                        parsed[room.id].images = parsed[room.id].images.map(img => ({ ...img, note: img.note || "" }));
+                        if (parsed[room.id].globalNote === undefined) parsed[room.id].globalNote = "";
+                    }
+                }
+                roomsData = parsed;
+            } catch(e) { initDefaultData(); }
+        } else {
+            initDefaultData();
+        }
+    }
+
+    function initDefaultData() {
+        const defaultData = {};
+        for (let room of ROOMS) {
+            defaultData[room.id] = { globalNote: "", images: [] };
+        }
+        roomsData = defaultData;
+    }
+
+    function persistData() {
+        try {
+            localStorage.setItem("homeRenovationData", JSON.stringify(roomsData));
+        } catch(e) {
+            alert("存储空间不足，请删除部分图片后重试。");
+            console.warn(e);
+        }
+    }
+
+    function generateId() {
+        return Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+    }
+
+    // 添加图片，带数量限制
+    function addImageToArea(areaId, file) {
+        return new Promise((resolve, reject) => {
+            const currentImages = roomsData[areaId]?.images || [];
+            if (currentImages.length >= MAX_IMAGES_PER_ROOM) {
+                alert(`每个空间最多只能添加 ${MAX_IMAGES_PER_ROOM} 张图片，已达到上限。`);
+                reject();
+                return;
+            }
+            if (!file.type.startsWith('image/')) {
+                alert("请选择图片文件");
+                reject();
+                return;
+            }
+            if (file.size > 2.5 * 1024 * 1024) {
+                alert("图片超过2.5MB，请压缩后上传或选择较小图片。");
+                reject();
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const base64 = e.target.result;
+                const newImage = {
+                    id: generateId(),
+                    src: base64,
+                    note: ""
+                };
+                if (!roomsData[areaId]) roomsData[areaId] = { globalNote: "", images: [] };
+                roomsData[areaId].images.push(newImage);
+                persistData();
+                renderRooms();
+                resolve();
+            };
+            reader.onerror = () => {
+                alert("读取图片失败");
+                reject();
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function updateImageNote(areaId, imageId, newNote) {
+        if (roomsData[areaId]) {
+            const img = roomsData[areaId].images.find(img => img.id === imageId);
+            if (img) {
+                img.note = newNote;
+                persistData();
+                renderRooms();
+            }
+        }
+    }
+
+    function deleteImage(areaId, imageId) {
+        if (roomsData[areaId]) {
+            const filtered = roomsData[areaId].images.filter(img => img.id !== imageId);
+            roomsData[areaId].images = filtered;
+            persistData();
+            renderRooms();
+        }
+    }
+
+    function updateGlobalNote(areaId, note) {
+        if (roomsData[areaId]) {
+            roomsData[areaId].globalNote = note;
+            persistData();
+            renderRooms();
+        }
+    }
+
+    function resetAllData() {
+        if (confirm("⚠️ 确定要清空所有空间里的图片和备注吗？此操作不可撤销。")) {
+            initDefaultData();
+            persistData();
+            renderRooms();
+        }
+    }
+
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    // 渲染所有房间
+    function renderRooms() {
+        const container = document.getElementById("roomsContainer");
+        if (!container) return;
+        container.innerHTML = "";
+
+        for (let room of ROOMS) {
+            const areaId = room.id;
+            const data = roomsData[areaId] || { globalNote: "", images: [] };
+            const globalNote = data.globalNote || "";
+            const images = data.images || [];
+            const imageCount = images.length;
+            const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
+
+            const card = document.createElement("div");
+            card.className = "room-card";
+            card.setAttribute("data-area", areaId);
+
+            // 头部
+            const headerDiv = document.createElement("div");
+            headerDiv.className = "room-header";
+            headerDiv.innerHTML = `
+                <div class="room-title">
+                    <i class="fas ${room.icon}"></i>
+                    <span>${room.name}</span>
+                </div>
+            `;
+            card.appendChild(headerDiv);
+
+            // 全局备注
+            const globalDiv = document.createElement("div");
+            globalDiv.className = "global-note-area";
+            globalDiv.innerHTML = `
+                <label><i class="fas fa-pen-fancy"></i> 空间笔记 / 灵感备注</label>
+                <textarea class="global-note-input" rows="2" placeholder="写点装修想法、配色方案、选材提醒...">${escapeHtml(globalNote)}</textarea>
+            `;
+            card.appendChild(globalDiv);
+
+            // 图片墙
+            const wallDiv = document.createElement("div");
+            wallDiv.className = "images-wall";
+
+            const imagesGrid = document.createElement("div");
+            imagesGrid.className = "images-grid";
+
+            if (images.length === 0) {
+                const emptyMsg = document.createElement("div");
+                emptyMsg.className = "empty-tip";
+                emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
+                imagesGrid.appendChild(emptyMsg);
+            } else {
+                images.forEach(img => {
+                    const imgItem = document.createElement("div");
+                    imgItem.className = "image-item";
+                    imgItem.innerHTML = `
+                        <img class="image-preview" src="${escapeHtml(img.src)}" alt="装修参考" loading="lazy">
+                        <div class="image-note">
+                            <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
+                        </div>
+                        <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
+                    `;
+                    imagesGrid.appendChild(imgItem);
+                });
+            }
+
+            wallDiv.appendChild(imagesGrid);
+
+            // 添加按钮 + 数量提示
+            const addBtn = document.createElement("button");
+            addBtn.className = "add-img-btn";
+            if (!canAddMore) addBtn.classList.add("disabled");
+            addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
+            if (!canAddMore) addBtn.disabled = true;
+            
+            const countTip = document.createElement("div");
+            countTip.className = "count-tip";
+            countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
+
+            wallDiv.appendChild(addBtn);
+            wallDiv.appendChild(countTip);
+
+            const fileInput = document.createElement("input");
+            fileInput.type = "file";
+            fileInput.accept = "image/*";
+            fileInput.style.display = "none";
+            wallDiv.appendChild(fileInput);
+            card.appendChild(wallDiv);
+            container.appendChild(card);
+
+            // 全局备注监听
+            const globalTextarea = card.querySelector(".global-note-input");
+            if (globalTextarea) {
+                globalTextarea.addEventListener("input", (e) => {
+                    updateGlobalNote(areaId, e.target.value);
+                });
+            }
+
+            // 图片备注监听
+            const noteTextareas = card.querySelectorAll(".note-input");
+            noteTextareas.forEach(textarea => {
+                const imageId = textarea.getAttribute("data-image-id");
+                textarea.addEventListener("input", (e) => {
+                    updateImageNote(areaId, imageId, e.target.value);
+                });
+            });
+
+            // 删除图片
+            const delBtns = card.querySelectorAll(".del-img-btn");
+            delBtns.forEach(btn => {
+                const imageId = btn.getAttribute("data-image-id");
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (confirm("确定删除这张图片吗？")) {
+                        deleteImage(areaId, imageId);
+                    }
+                });
+            });
+
+            // 添加图片按钮
+            if (canAddMore) {
+                const uploadBtn = addBtn;
+                const hiddenInput = fileInput;
+                uploadBtn.addEventListener("click", () => {
+                    hiddenInput.click();
+                });
+                hiddenInput.addEventListener("change", (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        addImageToArea(areaId, file).then(() => {
+                            hiddenInput.value = '';
+                        }).catch(() => { hiddenInput.value = ''; });
+                    } else {
+                        hiddenInput.value = '';
+                    }
+                });
+            }
+        }
+    }
+
+    function init() {
+        loadData();
+        renderRooms();
+        const resetBtn = document.getElementById("resetAllData");
+        if (resetBtn) {
+            resetBtn.addEventListener("click", resetAllData);
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
