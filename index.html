@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
-    <title>新房装修灵感板 | 多设备同步（导入/导出）</title>
+    <title>新房装修灵感板 | 稳定输入 + 多设备同步</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         * {
@@ -33,11 +33,6 @@
             background-clip: text;
             -webkit-background-clip: text;
             color: transparent;
-        }
-        .header p {
-            color: #8B6B4D;
-            margin-top: 0.3rem;
-            font-size: 0.85rem;
         }
         .toolbar {
             display: flex;
@@ -77,7 +72,6 @@
         }
         .room-card {
             background: #FFFFFFF2;
-            backdrop-filter: blur(2px);
             border-radius: 1.8rem;
             box-shadow: 0 12px 28px rgba(0,0,0,0.05);
             overflow: hidden;
@@ -245,18 +239,18 @@
 <div class="app-container">
     <div class="header">
         <h1><i class="fas fa-home"></i> 我家装修 · 灵感集</h1>
-        <p>每个空间可添加最多20张图片 + 文字备注 | 支持导入/导出，轻松多设备同步</p>
+        <p>每个空间可添加最多20张图片 + 文字备注 | 支持导入/导出，多设备手动同步</p>
         <div class="toolbar">
             <button id="exportDataBtn" class="btn"><i class="fas fa-download"></i> 导出数据</button>
             <button id="importDataBtn" class="btn"><i class="fas fa-upload"></i> 导入数据</button>
             <input type="file" id="importFileInput" accept=".json" style="display: none;">
             <button id="resetAllData" class="btn"><i class="fas fa-trash-alt"></i> 重置全部</button>
         </div>
-        <div class="sync-note"><i class="fas fa-cloud-upload-alt"></i> 导出后在其他设备导入即可同步所有图片与备注</div>
+        <div class="sync-note"><i class="fas fa-cloud-upload-alt"></i> 导出备份 → 在另一设备导入，即可同步所有图片与备注</div>
     </div>
 
     <div id="roomsContainer" class="rooms-grid"></div>
-    <footer>✨ 所有图片和备注自动保存至浏览器。使用“导出数据”备份，然后在另一台设备“导入数据”即可完成同步。</footer>
+    <footer>✨ 所有数据自动保存在当前浏览器。文本框均稳定可输入，图片支持拖拽/点击上传。</footer>
 </div>
 
 <script>
@@ -274,20 +268,15 @@
     ];
 
     const MAX_IMAGES_PER_ROOM = 20;
-
-    // 数据模型
     let roomsData = {};
 
-    // 存储每个房间当前渲染的DOM元素引用（用于局部更新，避免整体刷新）
-    let roomElements = {};
-
-    // 初始化数据
-    function initData() {
-        const defaultData = {};
+    // 初始化数据结构
+    function initDataStruct() {
+        const data = {};
         for (let room of ROOMS) {
-            defaultData[room.id] = { globalNote: "", images: [] };
+            data[room.id] = { globalNote: "", images: [] };
         }
-        return defaultData;
+        return data;
     }
 
     // 加载本地存储
@@ -306,13 +295,12 @@
                     if (parsed[room.id].globalNote === undefined) parsed[room.id].globalNote = "";
                 }
                 roomsData = parsed;
-            } catch(e) { roomsData = initData(); }
+            } catch(e) { roomsData = initDataStruct(); }
         } else {
-            roomsData = initData();
+            roomsData = initDataStruct();
         }
     }
 
-    // 保存到本地存储
     function persistToLocal() {
         try {
             localStorage.setItem("homeRenovationData", JSON.stringify(roomsData));
@@ -321,59 +309,16 @@
         }
     }
 
-    // 生成唯一ID
     function generateId() {
         return Date.now() + '-' + Math.random().toString(36).substring(2, 10);
     }
 
-    // ---------- 图片操作 ----------
-    function addImageToRoom(roomId, file) {
-        return new Promise((resolve, reject) => {
-            const room = roomsData[roomId];
-            if (!room) { reject(); return; }
-            if (room.images.length >= MAX_IMAGES_PER_ROOM) {
-                alert(`每个空间最多只能添加 ${MAX_IMAGES_PER_ROOM} 张图片，已达到上限。`);
-                reject();
-                return;
-            }
-            if (!file.type.startsWith('image/')) {
-                alert("请选择图片文件");
-                reject();
-                return;
-            }
-            if (file.size > 2.5 * 1024 * 1024) {
-                alert("图片超过2.5MB，请压缩后上传或选择较小图片。");
-                reject();
-                return;
-            }
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64 = e.target.result;
-                const newImage = {
-                    id: generateId(),
-                    src: base64,
-                    note: ""
-                };
-                room.images.push(newImage);
-                persistToLocal();
-                // 局部更新该房间的图片墙
-                refreshRoomImagesUI(roomId);
-                resolve();
-            };
-            reader.onerror = () => {
-                alert("读取图片失败");
-                reject();
-            };
-            reader.readAsDataURL(file);
-        });
-    }
-
-    function deleteImage(roomId, imageId) {
-        const room = roomsData[roomId];
-        if (room) {
-            room.images = room.images.filter(img => img.id !== imageId);
+    // ----- 核心操作函数（会同时更新内存、本地存储、UI）-----
+    function updateGlobalNote(roomId, note) {
+        if (roomsData[roomId]) {
+            roomsData[roomId].globalNote = note;
             persistToLocal();
-            refreshRoomImagesUI(roomId);
+            // 不需要刷新UI，因为文本框本身已经显示新值
         }
     }
 
@@ -384,32 +329,68 @@
             if (img) {
                 img.note = newNote;
                 persistToLocal();
-                // 只更新内存，UI不需要重新渲染，因为输入框已经实时显示
-                // 但为了保证备注内容同步到其他设备导入时保存，已经持久化。UI无需刷新。
             }
         }
     }
 
-    function updateGlobalNote(roomId, note) {
+    function deleteImage(roomId, imageId) {
         const room = roomsData[roomId];
         if (room) {
-            room.globalNote = note;
+            room.images = room.images.filter(img => img.id !== imageId);
             persistToLocal();
+            // 局部刷新图片列表
+            refreshImagesGrid(roomId);
         }
     }
 
-    // 局部刷新某个房间的图片墙（不影响输入框焦点）
-    function refreshRoomImagesUI(roomId) {
-        const roomElem = roomElements[roomId];
-        if (!roomElem) return;
-        const imagesWall = roomElem.querySelector('.images-wall');
+    async function addImageToRoom(roomId, file) {
+        const room = roomsData[roomId];
+        if (!room) return false;
+        if (room.images.length >= MAX_IMAGES_PER_ROOM) {
+            alert(`每个空间最多 ${MAX_IMAGES_PER_ROOM} 张图片，已达上限。`);
+            return false;
+        }
+        if (!file.type.startsWith('image/')) {
+            alert("请选择图片文件");
+            return false;
+        }
+        if (file.size > 2.5 * 1024 * 1024) {
+            alert("图片超过2.5MB，请压缩后再上传。");
+            return false;
+        }
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const newImage = {
+                    id: generateId(),
+                    src: e.target.result,
+                    note: ""
+                };
+                room.images.push(newImage);
+                persistToLocal();
+                refreshImagesGrid(roomId);
+                resolve(true);
+            };
+            reader.onerror = () => {
+                alert("读取图片失败");
+                resolve(false);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // 局部刷新某个房间的图片网格，保留全局备注框的焦点不变
+    function refreshImagesGrid(roomId) {
+        const roomCard = document.querySelector(`.room-card[data-room-id="${roomId}"]`);
+        if (!roomCard) return;
+        const imagesWall = roomCard.querySelector('.images-wall');
         if (!imagesWall) return;
         const room = roomsData[roomId];
         const images = room?.images || [];
         const imageCount = images.length;
         const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
 
-        // 重建 images-grid 部分
+        // 更新图片网格
         const imagesGrid = imagesWall.querySelector('.images-grid');
         if (imagesGrid) {
             imagesGrid.innerHTML = '';
@@ -434,7 +415,7 @@
             }
         }
 
-        // 更新按钮文字和状态
+        // 更新添加按钮状态
         const addBtn = imagesWall.querySelector('.add-img-btn');
         if (addBtn) {
             addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
@@ -451,177 +432,166 @@
             countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
         }
 
-        // 重新绑定新增的图片备注和删除按钮事件
-        bindImageEvents(roomId, imagesWall);
+        // 重新绑定新生成的图片备注和删除按钮事件
+        attachImageEvents(roomId, imagesWall);
     }
 
-    // 绑定图片备注输入和删除事件（避免全局刷新）
-    function bindImageEvents(roomId, container) {
-        // 图片备注输入框
-        const noteTextareas = container.querySelectorAll(".note-input");
+    // 绑定图片备注输入和删除按钮（确保每次局部刷新后事件生效）
+    function attachImageEvents(roomId, wallContainer) {
+        // 备注输入框
+        const noteTextareas = wallContainer.querySelectorAll('.note-input');
         noteTextareas.forEach(textarea => {
-            const imageId = textarea.getAttribute("data-image-id");
-            // 移除旧监听避免重复，使用新监听
-            textarea.removeEventListener("input", window._tmpNoteHandler);
+            const imageId = textarea.getAttribute('data-image-id');
+            // 避免重复绑定，先移除旧的
+            textarea.removeEventListener('input', textarea._inputHandler);
             const handler = (e) => {
                 updateImageNote(roomId, imageId, e.target.value);
             };
-            textarea.addEventListener("input", handler);
-            // 存储以便后续清理（非必须）
-            textarea._noteHandler = handler;
+            textarea.addEventListener('input', handler);
+            textarea._inputHandler = handler;
         });
 
         // 删除按钮
-        const delBtns = container.querySelectorAll(".del-img-btn");
+        const delBtns = wallContainer.querySelectorAll('.del-img-btn');
         delBtns.forEach(btn => {
-            const imageId = btn.getAttribute("data-image-id");
-            btn.removeEventListener("click", window._tmpDelHandler);
+            const imageId = btn.getAttribute('data-image-id');
+            btn.removeEventListener('click', btn._clickHandler);
             const handler = (e) => {
                 e.stopPropagation();
                 if (confirm("确定删除这张图片吗？")) {
                     deleteImage(roomId, imageId);
                 }
             };
-            btn.addEventListener("click", handler);
+            btn.addEventListener('click', handler);
+            btn._clickHandler = handler;
         });
     }
 
-    // 构建整个房间卡片（首次渲染）
-    function buildRoomCard(room) {
-        const roomId = room.id;
-        const data = roomsData[roomId] || { globalNote: "", images: [] };
-        const globalNote = data.globalNote || "";
-        const images = data.images || [];
-        const imageCount = images.length;
-        const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
-
-        const card = document.createElement("div");
-        card.className = "room-card";
-        card.setAttribute("data-room-id", roomId);
-
-        // 头部
-        const headerDiv = document.createElement("div");
-        headerDiv.className = "room-header";
-        headerDiv.innerHTML = `
-            <div class="room-title">
-                <i class="fas ${room.icon}"></i>
-                <span>${room.name}</span>
-            </div>
-        `;
-        card.appendChild(headerDiv);
-
-        // 全局备注
-        const globalDiv = document.createElement("div");
-        globalDiv.className = "global-note-area";
-        const textareaGlobal = document.createElement("textarea");
-        textareaGlobal.className = "global-note-input";
-        textareaGlobal.rows = 2;
-        textareaGlobal.placeholder = "写点装修想法、配色方案、选材提醒...";
-        textareaGlobal.value = globalNote;
-        globalDiv.appendChild(document.createElement("label")).innerHTML = '<i class="fas fa-pen-fancy"></i> 空间笔记 / 灵感备注';
-        globalDiv.appendChild(textareaGlobal);
-        card.appendChild(globalDiv);
-
-        // 图片墙区域
-        const wallDiv = document.createElement("div");
-        wallDiv.className = "images-wall";
-
-        const imagesGrid = document.createElement("div");
-        imagesGrid.className = "images-grid";
-        if (images.length === 0) {
-            const emptyMsg = document.createElement("div");
-            emptyMsg.className = "empty-tip";
-            emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
-            imagesGrid.appendChild(emptyMsg);
-        } else {
-            images.forEach(img => {
-                const imgItem = document.createElement("div");
-                imgItem.className = "image-item";
-                imgItem.innerHTML = `
-                    <img class="image-preview" src="${escapeHtml(img.src)}" alt="装修参考" loading="lazy">
-                    <div class="image-note">
-                        <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
-                    </div>
-                    <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
-                `;
-                imagesGrid.appendChild(imgItem);
-            });
-        }
-        wallDiv.appendChild(imagesGrid);
-
-        // 添加按钮
-        const addBtn = document.createElement("button");
-        addBtn.className = "add-img-btn";
-        if (!canAddMore) addBtn.classList.add("disabled");
-        addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
-        if (!canAddMore) addBtn.disabled = true;
-
-        const countTip = document.createElement("div");
-        countTip.className = "count-tip";
-        countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
-
-        const fileInput = document.createElement("input");
-        fileInput.type = "file";
-        fileInput.accept = "image/*";
-        fileInput.style.display = "none";
-
-        wallDiv.appendChild(addBtn);
-        wallDiv.appendChild(countTip);
-        wallDiv.appendChild(fileInput);
-        card.appendChild(wallDiv);
-
-        // 绑定全局备注事件（直接绑定，不刷新整个卡片）
-        textareaGlobal.addEventListener("input", (e) => {
-            updateGlobalNote(roomId, e.target.value);
-        });
-
-        // 绑定添加图片事件
-        if (canAddMore) {
-            addBtn.addEventListener("click", () => {
-                fileInput.click();
-            });
-            fileInput.addEventListener("change", (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    addImageToRoom(roomId, file).then(() => {
-                        fileInput.value = '';
-                    }).catch(() => { fileInput.value = ''; });
-                } else {
-                    fileInput.value = '';
-                }
-            });
-        }
-
-        // 绑定图片备注和删除事件
-        bindImageEvents(roomId, wallDiv);
-
-        // 存储房间元素引用
-        roomElements[roomId] = card;
-        return card;
-    }
-
-    // 全量渲染（只在初始化或重置/导入后调用）
+    // 全量渲染（只在初始化、重置、导入数据时调用）
     function fullRender() {
         const container = document.getElementById("roomsContainer");
         if (!container) return;
-        container.innerHTML = "";
-        roomElements = {};
+        container.innerHTML = '';
+
         for (let room of ROOMS) {
-            const card = buildRoomCard(room);
+            const roomId = room.id;
+            const data = roomsData[roomId];
+            const images = data?.images || [];
+            const globalNote = data?.globalNote || '';
+            const imageCount = images.length;
+            const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
+
+            const card = document.createElement("div");
+            card.className = "room-card";
+            card.setAttribute("data-room-id", roomId);
+
+            // 头部
+            const headerDiv = document.createElement("div");
+            headerDiv.className = "room-header";
+            headerDiv.innerHTML = `
+                <div class="room-title">
+                    <i class="fas ${room.icon}"></i>
+                    <span>${room.name}</span>
+                </div>
+            `;
+            card.appendChild(headerDiv);
+
+            // 全局备注区域
+            const globalDiv = document.createElement("div");
+            globalDiv.className = "global-note-area";
+            const label = document.createElement("label");
+            label.innerHTML = '<i class="fas fa-pen-fancy"></i> 空间笔记 / 灵感备注';
+            const textareaGlobal = document.createElement("textarea");
+            textareaGlobal.className = "global-note-input";
+            textareaGlobal.rows = 2;
+            textareaGlobal.placeholder = "写点装修想法、配色方案、选材提醒...";
+            textareaGlobal.value = globalNote;
+            globalDiv.appendChild(label);
+            globalDiv.appendChild(textareaGlobal);
+            card.appendChild(globalDiv);
+
+            // 图片墙
+            const wallDiv = document.createElement("div");
+            wallDiv.className = "images-wall";
+
+            const imagesGrid = document.createElement("div");
+            imagesGrid.className = "images-grid";
+            if (images.length === 0) {
+                const emptyMsg = document.createElement("div");
+                emptyMsg.className = "empty-tip";
+                emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
+                imagesGrid.appendChild(emptyMsg);
+            } else {
+                images.forEach(img => {
+                    const imgItem = document.createElement("div");
+                    imgItem.className = "image-item";
+                    imgItem.innerHTML = `
+                        <img class="image-preview" src="${escapeHtml(img.src)}" alt="装修参考" loading="lazy">
+                        <div class="image-note">
+                            <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
+                        </div>
+                        <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
+                    `;
+                    imagesGrid.appendChild(imgItem);
+                });
+            }
+            wallDiv.appendChild(imagesGrid);
+
+            // 添加按钮
+            const addBtn = document.createElement("button");
+            addBtn.className = "add-img-btn";
+            if (!canAddMore) addBtn.classList.add("disabled");
+            addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
+            if (!canAddMore) addBtn.disabled = true;
+
+            const countTip = document.createElement("div");
+            countTip.className = "count-tip";
+            countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
+
+            const fileInput = document.createElement("input");
+            fileInput.type = "file";
+            fileInput.accept = "image/*";
+            fileInput.style.display = "none";
+
+            wallDiv.appendChild(addBtn);
+            wallDiv.appendChild(countTip);
+            wallDiv.appendChild(fileInput);
+            card.appendChild(wallDiv);
+
             container.appendChild(card);
+
+            // 绑定全局备注事件
+            textareaGlobal.addEventListener("input", (e) => {
+                updateGlobalNote(roomId, e.target.value);
+            });
+
+            // 绑定添加图片事件
+            if (canAddMore) {
+                addBtn.addEventListener("click", () => fileInput.click());
+                fileInput.addEventListener("change", async (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        await addImageToRoom(roomId, file);
+                        fileInput.value = '';
+                    }
+                });
+            }
+
+            // 绑定图片备注及删除事件（针对首次生成的图片）
+            attachImageEvents(roomId, wallDiv);
         }
     }
 
-    // 重置全部数据
+    // 重置所有
     function resetAll() {
         if (confirm("⚠️ 确定要清空所有空间里的图片和备注吗？此操作不可撤销。")) {
-            roomsData = initData();
+            roomsData = initDataStruct();
             persistToLocal();
             fullRender();
         }
     }
 
-    // 导出数据（JSON文件）
+    // 导出数据
     function exportData() {
         const dataStr = JSON.stringify(roomsData, null, 2);
         const blob = new Blob([dataStr], {type: "application/json"});
@@ -641,8 +611,7 @@
         reader.onload = (e) => {
             try {
                 const imported = JSON.parse(e.target.result);
-                // 验证结构
-                if (typeof imported !== "object") throw new Error("格式错误");
+                if (typeof imported !== "object") throw new Error();
                 for (let room of ROOMS) {
                     if (!imported[room.id]) imported[room.id] = { globalNote: "", images: [] };
                     if (!imported[room.id].images) imported[room.id].images = [];
@@ -663,7 +632,6 @@
         reader.readAsText(file);
     }
 
-    // 辅助函数
     function escapeHtml(str) {
         if (!str) return "";
         return str.replace(/[&<>]/g, function(m) {
@@ -674,18 +642,15 @@
         });
     }
 
-    // 页面初始化
+    // 初始化
     function init() {
         loadFromLocal();
         fullRender();
 
-        // 按钮绑定
         document.getElementById("exportDataBtn").addEventListener("click", exportData);
         const importBtn = document.getElementById("importDataBtn");
         const importFile = document.getElementById("importFileInput");
-        importBtn.addEventListener("click", () => {
-            importFile.click();
-        });
+        importBtn.addEventListener("click", () => importFile.click());
         importFile.addEventListener("change", (e) => {
             if (e.target.files.length > 0) {
                 importData(e.target.files[0]);
