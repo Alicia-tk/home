@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D装修灵感看板 | 上传平面图+效果图，生成3D房间</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Poppins', sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 30px;
+            pointer-events: none;
+            z-index: 10;
+            font-size: 14px;
+            border-left: 4px solid #ff8c42;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .controls-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(30,30,40,0.85);
+            backdrop-filter: blur(12px);
+            border-radius: 24px;
+            padding: 16px 20px;
+            color: white;
+            z-index: 20;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            justify-content: space-between;
+            align-items: flex-end;
+            font-size: 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            pointer-events: auto;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+        .upload-group {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 8px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .upload-group label {
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            color: #ffaa66;
+        }
+        input[type="file"] {
+            background: #2c2c3a;
+            border: 1px solid #ffaa66;
+            border-radius: 40px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            width: 180px;
+        }
+        button {
+            background: #ff8c42;
+            border: none;
+            border-radius: 40px;
+            padding: 8px 20px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #1e1e2a;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #ffaa66;
+            transform: scale(1.02);
+        }
+        .status {
+            background: #1e1e2a;
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        @media (max-width: 700px) {
+            .controls-panel { flex-direction: column; align-items: stretch; bottom: 10px; left: 10px; right: 10px; }
+            .upload-group input { width: auto; }
+        }
+        .instruction {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            color: #ccc;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        🏠 3D 灵感看板 | 上传平面图作为地板 • 上传效果图作为墙面装饰
+    </div>
+    <div class="controls-panel">
+        <div class="upload-group">
+            <label>📐 1. 上传户型平面图 (地板纹理)</label>
+            <input type="file" id="floorPlanInput" accept="image/jpeg,image/png,image/webp">
+        </div>
+        <div class="upload-group">
+            <label>🖼️ 2. 上传装修效果图 (多张，自动贴于墙面)</label>
+            <input type="file" id="decoImagesInput" accept="image/jpeg,image/png,image/webp" multiple>
+        </div>
+        <button id="resetBtn">⟳ 重置相机视角</button>
+        <div class="status" id="statusMsg">✨ 等待上传图片...</div>
+    </div>
+    <div class="instruction">
+        🖱️ 鼠标拖拽旋转视角 | 右键平移 | 滚动缩放
+    </div>
+
+    <!-- 引入 Three.js 核心库以及扩展 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- 初始化场景、相机、渲染器 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a2a);
+        scene.fog = new THREE.FogExp2(0x0a0a2a, 0.008); // 轻微雾效增强景深
+
+        // 透视相机 (视角,宽高比,近平面,远平面)
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(5, 4, 6);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // 开启阴影映射增强真实感
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // CSS2渲染文字提示
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.left = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.body.appendChild(labelRenderer.domElement);
+
+        // --- 轨道控制 (支持交互) ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;      // 惯性效果
+        controls.dampingFactor = 0.05;
+        controls.rotateSpeed = 1.0;
+        controls.zoomSpeed = 1.2;
+        controls.panSpeed = 0.8;
+        controls.screenSpacePanning = true; // 避免平移时倾斜
+        controls.maxPolarAngle = Math.PI / 2.2;
+        controls.target.set(0, 0.5, 0);
+
+        // --- 灯光系统 (营造舒适室内氛围) ---
+        // 环境光
+        const ambientLight = new THREE.AmbientLight(0x404060);
+        scene.add(ambientLight);
+        // 主光源方向光
+        const dirLight = new THREE.DirectionalLight(0xfff5e0, 1);
+        dirLight.position.set(3, 5, 2);
+        dirLight.castShadow = true;
+        dirLight.receiveShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+        // 补光 - 从背面暖色
+        const backLight = new THREE.PointLight(0xffaa66, 0.5);
+        backLight.position.set(-2, 2, -3);
+        scene.add(backLight);
+        // 冷色辅光从侧面
+        const fillLight = new THREE.PointLight(0x88aaff, 0.4);
+        fillLight.position.set(2, 1, 3);
+        scene.add(fillLight);
+        // 地面下方微光，提升地板质感
+        const groundGlow = new THREE.PointLight(0xccaa88, 0.3);
+        groundGlow.position.set(0, -0.8, 0);
+        scene.add(groundGlow);
+
+        // 辅助网格辅助线 (可选，增加参考)
+        const gridHelper = new THREE.GridHelper(12, 20, 0xaa9977, 0x665533);
+        gridHelper.position.y = -0.01;
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.25;
+        scene.add(gridHelper);
+
+        // 简易的墙壁装饰框（用于放置上传的效果图）
+        // 我们将创建 6 个悬浮画框（四面墙 + 两个位置），实际效果图会替换画框中的纹理
+        // 为了更直观，我们在每个墙面上创建一个平面 (Mesh)，用户上传的效果图会依次贴到这些平面上
+        
+        // 定义墙壁的位置与尺寸 (房间尺寸 宽5, 长5, 高2.8)
+        const roomWidth = 5.2;
+        const roomDepth = 5.2;
+        const roomHeight = 2.8;
+        const wallThick = 0.1;
+        
+        // 为了方便管理贴图，我们创建一系列墙面画板（可替换纹理的Mesh）
+        const wallArtPanels = [];
+        
+        // 辅助函数：创建带边框的墙面装饰板
+        function createWallPanel(width, height, posX, posY, posZ, rotationY, index) {
+            const geometry = new THREE.PlaneGeometry(width, height);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xddccaa,
+                side: THREE.DoubleSide,
+                emissive: 0x221100,
+                roughness: 0.4,
+                metalness: 0.1
+            });
+            const panel = new THREE.Mesh(geometry, material);
+            panel.position.set(posX, posY, posZ);
+            panel.rotation.y = rotationY;
+            panel.castShadow = true;
+            panel.receiveShadow = false;
+            panel.userData = { isArtPanel: true, panelIndex: index, defaultColor: 0xddccaa };
+            scene.add(panel);
+            // 添加细边框装饰 (简单边缘线框)
+            const edgesGeo = new THREE.EdgesGeometry(geometry);
+            const edgesMat = new THREE.LineBasicMaterial({ color: 0xc9aa7b });
+            const wireframe = new THREE.LineSegments(edgesGeo, edgesMat);
+            panel.add(wireframe);
+            return panel;
+        }
+        
+        // 定义墙壁上的画板布局: 前墙(z正), 后墙(z负), 左墙(x负), 右墙(x正)
+        // 每面墙放置1-2个画板 (效果图展示区)
+        const panelConfigs = [
+            // 正面墙 (z = roomDepth/2) 位置 朝向里
+            { w: 1.6, h: 1.6, x: -1.2, y: 1.2, z: roomDepth/2 + 0.02, rotY: 0, name: "front1" },
+            { w: 1.6, h: 1.6, x: 1.2, y: 1.2, z: roomDepth/2 + 0.02, rotY: 0, name: "front2" },
+            // 背面墙 (z = -roomDepth/2)
+            { w: 1.6, h: 1.6, x: -1.2, y: 1.2, z: -roomDepth/2 - 0.02, rotY: Math.PI, name: "back1" },
+            { w: 1.6, h: 1.6, x: 1.2, y: 1.2, z: -roomDepth/2 - 0.02, rotY: Math.PI, name: "back2" },
+            // 左墙 (x = -roomWidth/2)
+            { w: 1.6, h: 1.6, x: -roomWidth/2 - 0.02, y: 1.2, z: -1.2, rotY: Math.PI/2, name: "left1" },
+            { w: 1.6, h: 1.6, x: -roomWidth/2 - 0.02, y: 1.2, z: 1.2, rotY: Math.PI/2, name: "left2" },
+            // 右墙 (x = roomWidth/2)
+            { w: 1.6, h: 1.6, x: roomWidth/2 + 0.02, y: 1.2, z: -1.2, rotY: -Math.PI/2, name: "right1" },
+            { w: 1.6, h: 1.6, x: roomWidth/2 + 0.02, y: 1.2, z: 1.2, rotY: -Math.PI/2, name: "right2" }
+        ];
+        
+        // 额外添加两个较小的画板在高处作为补充
+        const extraConfigs = [
+            { w: 1.2, h: 1.2, x: 0, y: 2.0, z: roomDepth/2 + 0.02, rotY: 0, name: "frontTop" },
+            { w: 1.2, h: 1.2, x: 0, y: 2.0, z: -roomDepth/2 - 0.02, rotY: Math.PI, name: "backTop" }
+        ];
+        const allConfigs = [...panelConfigs, ...extraConfigs];
+        
+        // 存储所有画板对象，用于后续替换纹理
+        const artPanels = [];
+        allConfigs.forEach((cfg, idx) => {
+            const panel = createWallPanel(cfg.w, cfg.h, cfg.x, cfg.y, cfg.z, cfg.rotY, idx);
+            artPanels.push(panel);
+        });
+        
+        // 创建地板 (接受平面图纹理)
+        let floorMesh = null;
+        function createFloor(textureImageUrl = null) {
+            if (floorMesh) scene.remove(floorMesh);
+            const geometry = new THREE.PlaneGeometry(roomWidth, roomDepth);
+            let material;
+            if (textureImageUrl) {
+                const texture = new THREE.TextureLoader().load(textureImageUrl);
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(2, 2);
+                material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.5, metalness: 0.1, side: THREE.DoubleSide });
+            } else {
+                material = new THREE.MeshStandardMaterial({ color: 0xc7b59b, roughness: 0.6, metalness: 0.05 });
+            }
+            floorMesh = new THREE.Mesh(geometry, material);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.position.y = -0.05;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+        }
+        createFloor(); // 默认木色地板
+        
+        // 创建简单的天花板装饰 (半透明白色板)
+        const ceilingGeo = new THREE.PlaneGeometry(roomWidth + 0.2, roomDepth + 0.2);
+        const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.8, metalness: 0.05, transparent: true, opacity: 0.2 });
+        const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
+        ceiling.rotation.x = Math.PI / 2;
+        ceiling.position.y = roomHeight - 0.1;
+        scene.add(ceiling);
+        
+        // 添加一些悬浮的粒子光效 (装饰)
+        const particleCount = 400;
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlePositions = new Float32Array(particleCount * 3);
+        for (let i = 0; i < particleCount; i++) {
+            particlePositions[i*3] = (Math.random() - 0.5) * 8;
+            particlePositions[i*3+1] = Math.random() * 2.5;
+            particlePositions[i*3+2] = (Math.random() - 0.5) * 7;
+        }
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        const particleMaterial = new THREE.PointsMaterial({ color: 0xffaa77, size: 0.035, transparent: true, opacity: 0.5 });
+        const particles = new THREE.Points(particlesGeometry, particleMaterial);
+        scene.add(particles);
+        
+        // 辅助: 文字标签 (CSS2D)
+        function addLabel(text, x, y, z, fontSize = '0.9rem') {
+            const div = document.createElement('div');
+            div.textContent = text;
+            div.style.backgroundColor = 'rgba(0,0,0,0.6)';
+            div.style.color = '#ffd9b5';
+            div.style.padding = '4px 12px';
+            div.style.borderRadius = '30px';
+            div.style.fontSize = fontSize;
+            div.style.fontWeight = 'bold';
+            div.style.backdropFilter = 'blur(4px)';
+            div.style.border = '1px solid #ffaa66';
+            div.style.fontFamily = 'sans-serif';
+            const labelObj = new CSS2DObject(div);
+            labelObj.position.set(x, y, z);
+            scene.add(labelObj);
+        }
+        addLabel('🖼️ 灵感画板', 0, 2.4, 2.7, '0.8rem');
+        addLabel('📌 平面图地板', 1.8, -0.3, 1.5, '0.7rem');
+        addLabel('✨ 上传效果图自动装饰墙面', 0, 1.8, -2.5, '0.7rem');
+        
+        // --- 核心功能：处理上传图片并替换纹理 ---
+        let pendingDecoImages = []; // 存储用户选择的效果图文件
+        
+        // 地板上传
+        const floorInput = document.getElementById('floorPlanInput');
+        floorInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const url = URL.createObjectURL(file);
+                const texture = new THREE.TextureLoader().load(url, () => {
+                    URL.revokeObjectURL(url);
+                    updateStatus('地板纹理已更新');
+                });
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(2, 2);
+                if (floorMesh) {
+                    floorMesh.material.map = texture;
+                    floorMesh.material.needsUpdate = true;
+                }
+            } else if(file) alert('请上传图片文件');
+        });
+        
+        // 多张效果图上传
+        const decoInput = document.getElementById('decoImagesInput');
+        decoInput.addEventListener('change', (event) => {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            pendingDecoImages = files;
+            updateStatus(`已选择 ${files.length} 张效果图，正在应用到画板...`);
+            applyImagesToPanels(files);
+        });
+        
+        // 将图片依次应用到画板上 (循环利用画板，按顺序覆盖纹理)
+        function applyImagesToPanels(images) {
+            if (!artPanels.length) return;
+            // 限制最多使用画板数量 (最多 artPanels.length 张)
+            const maxUse = Math.min(images.length, artPanels.length);
+            for (let i = 0; i < maxUse; i++) {
+                const panel = artPanels[i];
+                const file = images[i];
+                const url = URL.createObjectURL(file);
+                const texture = new THREE.TextureLoader().load(url, () => {
+                    URL.revokeObjectURL(url);
+                });
+                texture.wrapS = THREE.ClampToEdgeWrapping;
+                texture.wrapT = THREE.ClampToEdgeWrapping;
+                // 更新材质
+                if (panel.material) {
+                    panel.material.map = texture;
+                    panel.material.color.setHex(0xffffff);
+                    panel.material.needsUpdate = true;
+                } else {
+                    panel.material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.3, metalness: 0.05 });
+                }
+            }
+            // 如果图片数量少于画板数量，其余保持默认或清空？不清空，保持上次纹理
+            if (maxUse < artPanels.length) {
+                updateStatus(`已将 ${maxUse} 张效果图贴到墙面，剩余画板空白可继续上传。`);
+            } else {
+                updateStatus(`已成功应用 ${maxUse} 张效果图，所有画板已更新！`);
+            }
+            // 增加视觉效果：闪烁一下光晕
+            const flashLight = new THREE.PointLight(0xffaa77, 1, 8);
+            flashLight.position.set(0, 1.5, 0);
+            scene.add(flashLight);
+            setTimeout(() => scene.remove(flashLight), 300);
+        }
+        
+        function updateStatus(msg) {
+            const statusDiv = document.getElementById('statusMsg');
+            if (statusDiv) statusDiv.innerHTML = `✨ ${msg}`;
+            setTimeout(() => {
+                if (statusDiv && !statusDiv.innerHTML.includes('等待')) {
+                    setTimeout(() => {
+                        if (statusDiv) statusDiv.innerHTML = `✅ 就绪 | 可继续上传更多图片`;
+                    }, 2000);
+                }
+            }, 1500);
+        }
+        
+        // 重置相机视角
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            camera.position.set(5, 4, 6);
+            controls.target.set(0, 0.5, 0);
+            controls.update();
+            updateStatus('相机视角已重置');
+        });
+        
+        // 简单悬浮动画 - 粒子缓慢旋转
+        function animateParticles() {
+            particles.rotation.y += 0.002;
+            particles.rotation.x += 0.001;
+            requestAnimationFrame(animateParticles);
+        }
+        animateParticles();
+        
+        // 在场景中添加一圈半透明轮廓线，提升空间感
+        const roomEdges = [
+            [[-roomWidth/2, 0, -roomDepth/2], [ roomWidth/2, 0, -roomDepth/2]],
+            [[ roomWidth/2, 0, -roomDepth/2], [ roomWidth/2, 0,  roomDepth/2]],
+            [[ roomWidth/2, 0,  roomDepth/2], [-roomWidth/2, 0,  roomDepth/2]],
+            [[-roomWidth/2, 0,  roomDepth/2], [-roomWidth/2, 0, -roomDepth/2]],
+            [[-roomWidth/2, roomHeight, -roomDepth/2], [ roomWidth/2, roomHeight, -roomDepth/2]],
+            [[ roomWidth/2, roomHeight, -roomDepth/2], [ roomWidth/2, roomHeight,  roomDepth/2]],
+            [[ roomWidth/2, roomHeight,  roomDepth/2], [-roomWidth/2, roomHeight,  roomDepth/2]],
+            [[-roomWidth/2, roomHeight,  roomDepth/2], [-roomWidth/2, roomHeight, -roomDepth/2]],
+            // 垂直立柱
+            [[-roomWidth/2, 0, -roomDepth/2], [-roomWidth/2, roomHeight, -roomDepth/2]],
+            [[ roomWidth/2, 0, -roomDepth/2], [ roomWidth/2, roomHeight, -roomDepth/2]],
+            [[ roomWidth/2, 0,  roomDepth/2], [ roomWidth/2, roomHeight,  roomDepth/2]],
+            [[-roomWidth/2, 0,  roomDepth/2], [-roomWidth/2, roomHeight,  roomDepth/2]]
+        ];
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0xccaa77 });
+        roomEdges.forEach(edge => {
+            const points = edge.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, lineMaterial);
+            scene.add(line);
+        });
+        
+        // 添加温和的吊灯效果 (简单)
+        const lampLight = new THREE.PointLight(0xffcc99, 0.6);
+        lampLight.position.set(0, 2.4, 0);
+        lampLight.castShadow = true;
+        scene.add(lampLight);
+        const lampSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.12, 16, 16),
+            new THREE.MeshStandardMaterial({ color: 0xffdd99, emissive: 0x442200 })
+        );
+        lampSphere.position.set(0, 2.48, 0);
+        scene.add(lampSphere);
+        
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // 更新轨道
+            // 让灯光颜色轻微呼吸
+            const time = Date.now() * 0.002;
+            lampLight.intensity = 0.55 + Math.sin(time) * 0.1;
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        animate();
+        
+        // 窗口适配
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // 控制台输出提示
+        console.log('3D场景已启动 | 上传平面图作为地板，上传效果图自动替换墙面画板纹理');
+        updateStatus('上传平面图和效果图，立即生成专属3D空间');
+    </script>
+</body>
+</html>
