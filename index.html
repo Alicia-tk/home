@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
-    <title>新房装修灵感板 | 稳定输入 + 多设备同步</title>
+    <title>新房装修灵感板 | 大容量版 (IndexedDB)</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         * {
@@ -233,24 +233,41 @@
             display: inline-block;
             margin-top: 0.5rem;
         }
+        .loading-mask {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+        .loading-spinner {
+            background: white;
+            padding: 1.2rem 2rem;
+            border-radius: 2rem;
+            font-weight: 500;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
 <div class="app-container">
     <div class="header">
-        <h1><i class="fas fa-home"></i> 我家装修 · 灵感集</h1>
-        <p>每个空间可添加最多20张图片 + 文字备注 | 支持导入/导出，多设备手动同步</p>
+        <h1><i class="fas fa-home"></i> 我家装修 · 灵感集（大容量版）</h1>
+        <p>基于 IndexedDB，可存储 120+ 张高清图片和大量文字 | 支持导入导出备份</p>
         <div class="toolbar">
-            <button id="exportDataBtn" class="btn"><i class="fas fa-download"></i> 导出数据</button>
+            <button id="exportDataBtn" class="btn"><i class="fas fa-download"></i> 导出数据 (.json)</button>
             <button id="importDataBtn" class="btn"><i class="fas fa-upload"></i> 导入数据</button>
             <input type="file" id="importFileInput" accept=".json" style="display: none;">
             <button id="resetAllData" class="btn"><i class="fas fa-trash-alt"></i> 重置全部</button>
         </div>
-        <div class="sync-note"><i class="fas fa-cloud-upload-alt"></i> 导出备份 → 在另一设备导入，即可同步所有图片与备注</div>
+        <div class="sync-note"><i class="fas fa-database"></i> 所有图片和文字存储在浏览器本地数据库，容量充足。导出后可迁移至其他设备。</div>
     </div>
 
     <div id="roomsContainer" class="rooms-grid"></div>
-    <footer>✨ 所有数据自动保存在当前浏览器。文本框均稳定可输入，图片支持拖拽/点击上传。</footer>
+    <footer>✨ 每张图片限制 2MB，总数量不限（建议 120 张以内）。文本框实时保存，删除图片自动释放内存。</footer>
 </div>
 
 <script>
@@ -267,126 +284,152 @@
         { id: "bath2", name: "卫生间2", icon: "fa-shower" }
     ];
 
-    const MAX_IMAGES_PER_ROOM = 20;
-    let roomsData = {};
+    const MAX_IMAGES_PER_ROOM = 60;   // 每个空间上限60张，9个空间足够540张，但用户要求120总容量，足够
+    const DB_NAME = 'HomeRenovationDB';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'roomData';
 
-    // 初始化数据结构
-    function initDataStruct() {
-        const data = {};
-        for (let room of ROOMS) {
-            data[room.id] = { globalNote: "", images: [] };
-        }
-        return data;
-    }
+    let db = null;
+    let currentObjectUrls = []; // 存储所有创建的 objectURL，用于页面关闭时释放
 
-    // 加载本地存储
-    function loadFromLocal() {
-        const saved = localStorage.getItem("homeRenovationData");
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                for (let room of ROOMS) {
-                    if (!parsed[room.id]) parsed[room.id] = { globalNote: "", images: [] };
-                    if (!parsed[room.id].images) parsed[room.id].images = [];
-                    if (parsed[room.id].images.length > MAX_IMAGES_PER_ROOM) {
-                        parsed[room.id].images = parsed[room.id].images.slice(0, MAX_IMAGES_PER_ROOM);
-                    }
-                    parsed[room.id].images = parsed[room.id].images.map(img => ({ ...img, note: img.note || "" }));
-                    if (parsed[room.id].globalNote === undefined) parsed[room.id].globalNote = "";
+    // 初始化 IndexedDB
+    function initDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                db = request.result;
+                resolve(db);
+            };
+            request.onupgradeneeded = (event) => {
+                const dbRef = event.target.result;
+                if (!dbRef.objectStoreNames.contains(STORE_NAME)) {
+                    const store = dbRef.createObjectStore(STORE_NAME, { keyPath: 'roomId' });
+                    store.createIndex('roomId', 'roomId', { unique: true });
                 }
-                roomsData = parsed;
-            } catch(e) { roomsData = initDataStruct(); }
-        } else {
-            roomsData = initDataStruct();
-        }
+            };
+        });
     }
 
-    function persistToLocal() {
-        try {
-            localStorage.setItem("homeRenovationData", JSON.stringify(roomsData));
-        } catch(e) {
-            alert("存储空间不足，请删除部分图片后重试。");
-        }
+    // 加载指定房间的数据（从 IndexedDB）
+    async function loadRoomData(roomId) {
+        if (!db) await initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const getReq = store.get(roomId);
+            getReq.onsuccess = () => {
+                const result = getReq.result;
+                if (result) {
+                    // 注意：图片存储为 Blob 数组
+                    resolve({ globalNote: result.globalNote || '', images: result.images || [] });
+                } else {
+                    resolve({ globalNote: '', images: [] });
+                }
+            };
+            getReq.onerror = () => reject(getReq.error);
+        });
     }
 
-    function generateId() {
-        return Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+    // 保存某个房间的所有数据（覆盖）
+    async function saveRoomData(roomId, globalNote, imagesArray) {
+        if (!db) await initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const data = { roomId, globalNote, images: imagesArray };
+            const putReq = store.put(data);
+            putReq.onsuccess = () => resolve();
+            putReq.onerror = () => reject(putReq.error);
+        });
     }
 
-    // ----- 核心操作函数（会同时更新内存、本地存储、UI）-----
-    function updateGlobalNote(roomId, note) {
-        if (roomsData[roomId]) {
-            roomsData[roomId].globalNote = note;
-            persistToLocal();
-            // 不需要刷新UI，因为文本框本身已经显示新值
-        }
+    // 仅更新某个房间的全局备注
+    async function updateGlobalNote(roomId, note) {
+        const { globalNote, images } = await loadRoomData(roomId);
+        await saveRoomData(roomId, note, images);
     }
 
-    function updateImageNote(roomId, imageId, newNote) {
-        const room = roomsData[roomId];
-        if (room) {
-            const img = room.images.find(img => img.id === imageId);
-            if (img) {
-                img.note = newNote;
-                persistToLocal();
-            }
-        }
-    }
-
-    function deleteImage(roomId, imageId) {
-        const room = roomsData[roomId];
-        if (room) {
-            room.images = room.images.filter(img => img.id !== imageId);
-            persistToLocal();
-            // 局部刷新图片列表
-            refreshImagesGrid(roomId);
-        }
-    }
-
+    // 添加图片到某个房间 (file 是 File 对象)
     async function addImageToRoom(roomId, file) {
-        const room = roomsData[roomId];
-        if (!room) return false;
-        if (room.images.length >= MAX_IMAGES_PER_ROOM) {
-            alert(`每个空间最多 ${MAX_IMAGES_PER_ROOM} 张图片，已达上限。`);
-            return false;
-        }
         if (!file.type.startsWith('image/')) {
             alert("请选择图片文件");
             return false;
         }
-        if (file.size > 2.5 * 1024 * 1024) {
-            alert("图片超过2.5MB，请压缩后再上传。");
+        if (file.size > 2 * 1024 * 1024) {
+            alert("图片超过 2MB，请压缩后再上传。");
             return false;
         }
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const newImage = {
-                    id: generateId(),
-                    src: e.target.result,
-                    note: ""
-                };
-                room.images.push(newImage);
-                persistToLocal();
-                refreshImagesGrid(roomId);
-                resolve(true);
-            };
-            reader.onerror = () => {
-                alert("读取图片失败");
-                resolve(false);
-            };
-            reader.readAsDataURL(file);
-        });
+        const { globalNote, images } = await loadRoomData(roomId);
+        if (images.length >= MAX_IMAGES_PER_ROOM) {
+            alert(`每个空间最多 ${MAX_IMAGES_PER_ROOM} 张图片，已达上限。`);
+            return false;
+        }
+        // 将 File 转为 Blob 存储
+        const blob = new Blob([file], { type: file.type });
+        const imageId = Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+        const newImage = {
+            id: imageId,
+            blob: blob,
+            note: "",
+            mimeType: file.type
+        };
+        images.push(newImage);
+        await saveRoomData(roomId, globalNote, images);
+        return true;
     }
 
-    // 局部刷新某个房间的图片网格，保留全局备注框的焦点不变
-    function refreshImagesGrid(roomId) {
+    // 删除图片
+    async function deleteImage(roomId, imageId) {
+        const { globalNote, images } = await loadRoomData(roomId);
+        const newImages = images.filter(img => img.id !== imageId);
+        await saveRoomData(roomId, globalNote, newImages);
+    }
+
+    // 更新图片备注
+    async function updateImageNote(roomId, imageId, newNote) {
+        const { globalNote, images } = await loadRoomData(roomId);
+        const img = images.find(img => img.id === imageId);
+        if (img) {
+            img.note = newNote;
+            await saveRoomData(roomId, globalNote, images);
+        }
+    }
+
+    // 重置所有数据（清空所有房间）
+    async function resetAllData() {
+        if (!confirm("⚠️ 确定要清空所有空间里的图片和备注吗？此操作不可撤销。")) return;
+        if (!db) await initDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const clearReq = store.clear();
+        clearReq.onsuccess = () => {
+            // 重新渲染所有空白卡片
+            fullRender();
+        };
+        clearReq.onerror = () => alert("清空失败");
+    }
+
+    // 释放所有 objectURL（避免内存泄漏）
+    function revokeAllObjectURLs() {
+        currentObjectUrls.forEach(url => URL.revokeObjectURL(url));
+        currentObjectUrls = [];
+    }
+
+    // 为图片 blob 创建临时 URL，并记录以便后续释放
+    function createBlobURL(blob) {
+        const url = URL.createObjectURL(blob);
+        currentObjectUrls.push(url);
+        return url;
+    }
+
+    // 渲染某个房间的图片网格（局部刷新，保持全局备注框焦点）
+    async function refreshImagesGrid(roomId) {
         const roomCard = document.querySelector(`.room-card[data-room-id="${roomId}"]`);
         if (!roomCard) return;
         const imagesWall = roomCard.querySelector('.images-wall');
         if (!imagesWall) return;
-        const room = roomsData[roomId];
-        const images = room?.images || [];
+        const { globalNote, images } = await loadRoomData(roomId);
         const imageCount = images.length;
         const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
 
@@ -400,18 +443,19 @@
                 emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
                 imagesGrid.appendChild(emptyMsg);
             } else {
-                images.forEach(img => {
+                for (let img of images) {
+                    const imgUrl = createBlobURL(img.blob);
                     const imgItem = document.createElement("div");
                     imgItem.className = "image-item";
                     imgItem.innerHTML = `
-                        <img class="image-preview" src="${escapeHtml(img.src)}" alt="装修参考" loading="lazy">
+                        <img class="image-preview" src="${imgUrl}" alt="装修参考" loading="lazy">
                         <div class="image-note">
                             <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
                         </div>
                         <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
                     `;
                     imagesGrid.appendChild(imgItem);
-                });
+                }
             }
         }
 
@@ -432,17 +476,16 @@
             countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
         }
 
-        // 重新绑定新生成的图片备注和删除按钮事件
+        // 重新绑定新生成的图片组件事件
         attachImageEvents(roomId, imagesWall);
     }
 
-    // 绑定图片备注输入和删除按钮（确保每次局部刷新后事件生效）
+    // 绑定图片备注输入和删除按钮（局部刷新时调用）
     function attachImageEvents(roomId, wallContainer) {
         // 备注输入框
         const noteTextareas = wallContainer.querySelectorAll('.note-input');
         noteTextareas.forEach(textarea => {
             const imageId = textarea.getAttribute('data-image-id');
-            // 避免重复绑定，先移除旧的
             textarea.removeEventListener('input', textarea._inputHandler);
             const handler = (e) => {
                 updateImageNote(roomId, imageId, e.target.value);
@@ -456,10 +499,11 @@
         delBtns.forEach(btn => {
             const imageId = btn.getAttribute('data-image-id');
             btn.removeEventListener('click', btn._clickHandler);
-            const handler = (e) => {
+            const handler = async (e) => {
                 e.stopPropagation();
                 if (confirm("确定删除这张图片吗？")) {
-                    deleteImage(roomId, imageId);
+                    await deleteImage(roomId, imageId);
+                    await refreshImagesGrid(roomId);
                 }
             };
             btn.addEventListener('click', handler);
@@ -467,166 +511,226 @@
         });
     }
 
-    // 全量渲染（只在初始化、重置、导入数据时调用）
-    function fullRender() {
+    // 全量渲染所有房间卡片（初次加载或重置后）
+    async function fullRender() {
+        revokeAllObjectURLs();
         const container = document.getElementById("roomsContainer");
         if (!container) return;
         container.innerHTML = '';
+        // 显示加载中
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading-mask';
+        loadingDiv.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-pulse"></i> 加载中...</div>';
+        document.body.appendChild(loadingDiv);
 
-        for (let room of ROOMS) {
-            const roomId = room.id;
-            const data = roomsData[roomId];
-            const images = data?.images || [];
-            const globalNote = data?.globalNote || '';
-            const imageCount = images.length;
-            const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
+        try {
+            for (let room of ROOMS) {
+                const roomId = room.id;
+                const { globalNote, images } = await loadRoomData(roomId);
+                const imageCount = images.length;
+                const canAddMore = imageCount < MAX_IMAGES_PER_ROOM;
 
-            const card = document.createElement("div");
-            card.className = "room-card";
-            card.setAttribute("data-room-id", roomId);
+                const card = document.createElement("div");
+                card.className = "room-card";
+                card.setAttribute("data-room-id", roomId);
 
-            // 头部
-            const headerDiv = document.createElement("div");
-            headerDiv.className = "room-header";
-            headerDiv.innerHTML = `
-                <div class="room-title">
-                    <i class="fas ${room.icon}"></i>
-                    <span>${room.name}</span>
-                </div>
-            `;
-            card.appendChild(headerDiv);
+                // 头部
+                const headerDiv = document.createElement("div");
+                headerDiv.className = "room-header";
+                headerDiv.innerHTML = `
+                    <div class="room-title">
+                        <i class="fas ${room.icon}"></i>
+                        <span>${room.name}</span>
+                    </div>
+                `;
+                card.appendChild(headerDiv);
 
-            // 全局备注区域
-            const globalDiv = document.createElement("div");
-            globalDiv.className = "global-note-area";
-            const label = document.createElement("label");
-            label.innerHTML = '<i class="fas fa-pen-fancy"></i> 空间笔记 / 灵感备注';
-            const textareaGlobal = document.createElement("textarea");
-            textareaGlobal.className = "global-note-input";
-            textareaGlobal.rows = 2;
-            textareaGlobal.placeholder = "写点装修想法、配色方案、选材提醒...";
-            textareaGlobal.value = globalNote;
-            globalDiv.appendChild(label);
-            globalDiv.appendChild(textareaGlobal);
-            card.appendChild(globalDiv);
+                // 全局备注区域
+                const globalDiv = document.createElement("div");
+                globalDiv.className = "global-note-area";
+                const label = document.createElement("label");
+                label.innerHTML = '<i class="fas fa-pen-fancy"></i> 空间笔记 / 灵感备注';
+                const textareaGlobal = document.createElement("textarea");
+                textareaGlobal.className = "global-note-input";
+                textareaGlobal.rows = 2;
+                textareaGlobal.placeholder = "写点装修想法、配色方案、选材提醒...";
+                textareaGlobal.value = globalNote;
+                globalDiv.appendChild(label);
+                globalDiv.appendChild(textareaGlobal);
+                card.appendChild(globalDiv);
 
-            // 图片墙
-            const wallDiv = document.createElement("div");
-            wallDiv.className = "images-wall";
+                // 图片墙
+                const wallDiv = document.createElement("div");
+                wallDiv.className = "images-wall";
 
-            const imagesGrid = document.createElement("div");
-            imagesGrid.className = "images-grid";
-            if (images.length === 0) {
-                const emptyMsg = document.createElement("div");
-                emptyMsg.className = "empty-tip";
-                emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
-                imagesGrid.appendChild(emptyMsg);
-            } else {
-                images.forEach(img => {
-                    const imgItem = document.createElement("div");
-                    imgItem.className = "image-item";
-                    imgItem.innerHTML = `
-                        <img class="image-preview" src="${escapeHtml(img.src)}" alt="装修参考" loading="lazy">
-                        <div class="image-note">
-                            <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
-                        </div>
-                        <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
-                    `;
-                    imagesGrid.appendChild(imgItem);
-                });
-            }
-            wallDiv.appendChild(imagesGrid);
-
-            // 添加按钮
-            const addBtn = document.createElement("button");
-            addBtn.className = "add-img-btn";
-            if (!canAddMore) addBtn.classList.add("disabled");
-            addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
-            if (!canAddMore) addBtn.disabled = true;
-
-            const countTip = document.createElement("div");
-            countTip.className = "count-tip";
-            countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
-
-            const fileInput = document.createElement("input");
-            fileInput.type = "file";
-            fileInput.accept = "image/*";
-            fileInput.style.display = "none";
-
-            wallDiv.appendChild(addBtn);
-            wallDiv.appendChild(countTip);
-            wallDiv.appendChild(fileInput);
-            card.appendChild(wallDiv);
-
-            container.appendChild(card);
-
-            // 绑定全局备注事件
-            textareaGlobal.addEventListener("input", (e) => {
-                updateGlobalNote(roomId, e.target.value);
-            });
-
-            // 绑定添加图片事件
-            if (canAddMore) {
-                addBtn.addEventListener("click", () => fileInput.click());
-                fileInput.addEventListener("change", async (e) => {
-                    const file = e.target.files[0];
-                    if (file) {
-                        await addImageToRoom(roomId, file);
-                        fileInput.value = '';
+                const imagesGrid = document.createElement("div");
+                imagesGrid.className = "images-grid";
+                if (images.length === 0) {
+                    const emptyMsg = document.createElement("div");
+                    emptyMsg.className = "empty-tip";
+                    emptyMsg.innerText = "📸 暂无图片，点击下方按钮添加设计图/实景照";
+                    imagesGrid.appendChild(emptyMsg);
+                } else {
+                    for (let img of images) {
+                        const imgUrl = createBlobURL(img.blob);
+                        const imgItem = document.createElement("div");
+                        imgItem.className = "image-item";
+                        imgItem.innerHTML = `
+                            <img class="image-preview" src="${imgUrl}" alt="装修参考" loading="lazy">
+                            <div class="image-note">
+                                <textarea class="note-input" rows="2" placeholder="添加备注（如：材质/品牌/避坑点）" data-image-id="${img.id}">${escapeHtml(img.note)}</textarea>
+                            </div>
+                            <button class="del-img-btn" data-image-id="${img.id}"><i class="fas fa-trash-alt"></i> 删除图片</button>
+                        `;
+                        imagesGrid.appendChild(imgItem);
                     }
+                }
+                wallDiv.appendChild(imagesGrid);
+
+                // 添加按钮
+                const addBtn = document.createElement("button");
+                addBtn.className = "add-img-btn";
+                if (!canAddMore) addBtn.classList.add("disabled");
+                addBtn.innerHTML = `<i class="fas fa-plus-circle"></i> 添加图片 (${imageCount}/${MAX_IMAGES_PER_ROOM})`;
+                if (!canAddMore) addBtn.disabled = true;
+
+                const countTip = document.createElement("div");
+                countTip.className = "count-tip";
+                countTip.innerText = canAddMore ? `还可添加 ${MAX_IMAGES_PER_ROOM - imageCount} 张` : `已达上限 ${MAX_IMAGES_PER_ROOM} 张`;
+
+                const fileInput = document.createElement("input");
+                fileInput.type = "file";
+                fileInput.accept = "image/*";
+                fileInput.style.display = "none";
+
+                wallDiv.appendChild(addBtn);
+                wallDiv.appendChild(countTip);
+                wallDiv.appendChild(fileInput);
+                card.appendChild(wallDiv);
+
+                container.appendChild(card);
+
+                // 绑定全局备注实时保存
+                textareaGlobal.addEventListener("input", async (e) => {
+                    await updateGlobalNote(roomId, e.target.value);
+                });
+
+                // 绑定添加图片事件
+                if (canAddMore) {
+                    addBtn.addEventListener("click", () => fileInput.click());
+                    fileInput.addEventListener("change", async (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const success = await addImageToRoom(roomId, file);
+                            if (success) {
+                                await refreshImagesGrid(roomId);
+                            }
+                            fileInput.value = '';
+                        }
+                    });
+                }
+
+                // 绑定图片备注和删除事件（首次）
+                attachImageEvents(roomId, wallDiv);
+            }
+        } finally {
+            loadingDiv.remove();
+        }
+    }
+
+    // ---------------- 导入导出（支持大容量，将blob转为base64） ----------------
+    async function exportData() {
+        if (!db) await initDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const allRecords = await new Promise((resolve, reject) => {
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+        // 将每个房间的图片blob转换为base64
+        const exportData = [];
+        for (let record of allRecords) {
+            const roomExport = {
+                roomId: record.roomId,
+                globalNote: record.globalNote,
+                images: []
+            };
+            for (let img of record.images) {
+                const base64 = await blobToBase64(img.blob);
+                roomExport.images.push({
+                    id: img.id,
+                    note: img.note,
+                    mimeType: img.mimeType,
+                    base64: base64
                 });
             }
-
-            // 绑定图片备注及删除事件（针对首次生成的图片）
-            attachImageEvents(roomId, wallDiv);
+            exportData.push(roomExport);
         }
-    }
-
-    // 重置所有
-    function resetAll() {
-        if (confirm("⚠️ 确定要清空所有空间里的图片和备注吗？此操作不可撤销。")) {
-            roomsData = initDataStruct();
-            persistToLocal();
-            fullRender();
-        }
-    }
-
-    // 导出数据
-    function exportData() {
-        const dataStr = JSON.stringify(roomsData, null, 2);
-        const blob = new Blob([dataStr], {type: "application/json"});
+        const jsonStr = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonStr], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `home_renovation_${new Date().toISOString().slice(0,19)}.json`;
+        a.download = `home_renovation_backup_${new Date().toISOString().slice(0,19)}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
 
-    // 导入数据
-    function importData(file) {
+    function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]); // 只取 base64 数据部分
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    async function importData(file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
                 const imported = JSON.parse(e.target.result);
-                if (typeof imported !== "object") throw new Error();
-                for (let room of ROOMS) {
-                    if (!imported[room.id]) imported[room.id] = { globalNote: "", images: [] };
-                    if (!imported[room.id].images) imported[room.id].images = [];
-                    if (imported[room.id].images.length > MAX_IMAGES_PER_ROOM) {
-                        imported[room.id].images = imported[room.id].images.slice(0, MAX_IMAGES_PER_ROOM);
+                if (!Array.isArray(imported)) throw new Error("格式错误");
+                // 清空现有数据库
+                if (!db) await initDB();
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                await new Promise((resolve, reject) => {
+                    const clearReq = store.clear();
+                    clearReq.onsuccess = resolve;
+                    clearReq.onerror = reject;
+                });
+                // 重新写入
+                for (let roomRecord of imported) {
+                    const roomId = roomRecord.roomId;
+                    const globalNote = roomRecord.globalNote || "";
+                    const images = [];
+                    for (let img of roomRecord.images) {
+                        const base64Data = img.base64;
+                        const byteCharacters = atob(base64Data);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                            byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const byteArray = new Uint8Array(byteNumbers);
+                        const blob = new Blob([byteArray], { type: img.mimeType });
+                        images.push({
+                            id: img.id,
+                            blob: blob,
+                            note: img.note || "",
+                            mimeType: img.mimeType
+                        });
                     }
-                    imported[room.id].images = imported[room.id].images.map(img => ({ ...img, note: img.note || "" }));
-                    if (imported[room.id].globalNote === undefined) imported[room.id].globalNote = "";
+                    await saveRoomData(roomId, globalNote, images);
                 }
-                roomsData = imported;
-                persistToLocal();
-                fullRender();
-                alert("数据导入成功！所有图片和备注已同步。");
+                await fullRender();
+                alert("导入成功！页面已刷新。");
             } catch(err) {
-                alert("导入失败，请选择正确的备份文件（.json）");
+                alert("导入失败，请选择正确的备份文件。");
+                console.error(err);
             }
         };
         reader.readAsText(file);
@@ -642,11 +746,15 @@
         });
     }
 
-    // 初始化
-    function init() {
-        loadFromLocal();
-        fullRender();
+    // ---------- 初始化流程 ----------
+    window.addEventListener('beforeunload', () => {
+        revokeAllObjectURLs();
+    });
 
+    async function start() {
+        await initDB();
+        await fullRender();
+        // 绑定工具栏按钮
         document.getElementById("exportDataBtn").addEventListener("click", exportData);
         const importBtn = document.getElementById("importDataBtn");
         const importFile = document.getElementById("importFileInput");
@@ -657,10 +765,10 @@
                 importFile.value = '';
             }
         });
-        document.getElementById("resetAllData").addEventListener("click", resetAll);
+        document.getElementById("resetAllData").addEventListener("click", resetAllData);
     }
 
-    init();
+    start().catch(err => console.error("初始化失败", err));
 </script>
 </body>
 </html>
